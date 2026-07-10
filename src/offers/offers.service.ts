@@ -21,7 +21,8 @@ export class OffersService {
     private readonly feishu: FeishuService,
   ) {}
 
-  /** HR谈薪完成后创建offer，并立即向HR/业务leader/COO群发飞书确认卡片（不走正式审批流） */
+  /** HR谈薪完成后创建offer，并立即向HR/业务leader/COO群发飞书确认卡片（不走正式审批流）
+   *  confirmers里的confirmerId，HR界面填的是邮箱；如果飞书已配置，这里会解析成真实open_id存库和寻址。 */
   async create(dto: CreateOfferDto) {
     const offer = await this.repo.save(
       this.repo.create({
@@ -29,14 +30,21 @@ export class OffersService {
         salaryFinal: dto.salaryFinal, status: OfferStatus.PENDING_CONFIRM,
       }),
     );
+
+    const resolvedConfirmers = await Promise.all(
+      dto.confirmers.map(async (c) => {
+        const resolvedOpenId = await this.feishu.getOpenIdByEmail(c.confirmerId);
+        return { ...c, addressId: resolvedOpenId || c.confirmerId };
+      }),
+    );
     await this.confirmRepo.save(
-      dto.confirmers.map((c) => this.confirmRepo.create({ offerId: offer.id, confirmerId: c.confirmerId, confirmerRole: c.confirmerRole })),
+      resolvedConfirmers.map((c) => this.confirmRepo.create({ offerId: offer.id, confirmerId: c.addressId, confirmerRole: c.confirmerRole })),
     );
 
     const candidate = await this.candidatesService.findOne(dto.candidateId);
     const position = await this.positionsService.findOne(dto.positionId);
     const card = this.feishu.buildOfferConfirmCard(candidate.name, position.title, dto.salaryFinal, offer.id);
-    await this.feishu.sendCardToMultiple(dto.confirmers.map((c) => c.confirmerId), card);
+    await this.feishu.sendCardToMultiple(resolvedConfirmers.map((c) => c.addressId), card);
 
     return offer;
   }

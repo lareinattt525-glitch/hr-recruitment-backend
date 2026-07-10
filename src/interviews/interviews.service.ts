@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Interview } from './entities/interview.entity';
 import { InterviewQuestionSuggestion } from './entities/interview-question-suggestion.entity';
 import { InterviewerResponse } from './entities/interviewer-response.entity';
@@ -70,15 +70,19 @@ export class InterviewsService {
     return interview;
   }
 
-  /** 推送候选人给业务面试官：发送飞书交互卡片（同意面试/暂不安排 + 时间段选择器） */
-  async pushToBusiness(interviewId: string, interviewerId: string) {
+  /** 推送候选人给业务面试官：发送飞书交互卡片（同意面试/暂不安排 + 时间段选择器）
+   *  interviewerIdentifier 可以是邮箱（HR在界面里填的）；如果飞书已配置，会自动解析成真实open_id
+   *  并以open_id存库寻址；如果飞书未配置，就原样存邮箱字符串（配合"模拟飞书"webhook走通流程）。 */
+  async pushToBusiness(interviewId: string, interviewerIdentifier: string) {
     const interview = await this.findOne(interviewId);
-    interview.interviewerId = interviewerId;
+    const resolvedOpenId = await this.feishu.getOpenIdByEmail(interviewerIdentifier);
+    const addressId = resolvedOpenId || interviewerIdentifier;
+    interview.interviewerId = addressId;
     await this.repo.save(interview);
     const resume = await this.resumesService.findOne(interview.resumeId);
     const position = await this.positionsService.findOne(interview.positionId);
     const card = this.feishu.buildCandidateCard(resume, position);
-    await this.feishu.sendCardMessage(interviewerId, card);
+    await this.feishu.sendCardMessage(addressId, card);
     return interview;
   }
 
@@ -107,8 +111,14 @@ export class InterviewsService {
     return interview;
   }
 
-  findByInterviewer(interviewerId: string) {
-    return this.repo.find({ where: { interviewerId }, order: { createdAt: 'DESC' } });
+  /** 面试官用邮箱登录我们的网页，但候选人卡片是按open_id寻址存库的（飞书接入后）——
+   *  这里同时按"登录邮箱本身"和"该邮箱解析出的open_id"查询，两种情况都能查到。 */
+  async findByInterviewer(interviewerIdentifier: string) {
+    const resolvedOpenId = await this.feishu.getOpenIdByEmail(interviewerIdentifier);
+    const candidates = resolvedOpenId && resolvedOpenId !== interviewerIdentifier
+      ? [interviewerIdentifier, resolvedOpenId]
+      : [interviewerIdentifier];
+    return this.repo.find({ where: { interviewerId: In(candidates) }, order: { createdAt: 'DESC' } });
   }
 
   findByResume(resumeId: string) {

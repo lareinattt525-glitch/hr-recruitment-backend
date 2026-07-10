@@ -16,6 +16,7 @@ import { EmailPollingModule } from './email-polling/email-polling.module';
 import { OperationLogsModule } from './operation-logs/operation-logs.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
+import { FeishuWebhookModule } from './feishu-webhook/feishu-webhook.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { HealthController } from './health/health.controller';
@@ -36,6 +37,7 @@ import { HealthController } from './health/health.controller';
     InterviewsModule,
     OffersModule,
     EmailPollingModule,
+    FeishuWebhookModule,
   ],
   controllers: [HealthController],
   providers: [

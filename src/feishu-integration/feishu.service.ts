@@ -15,6 +15,25 @@ export class FeishuService {
     return !!(this.config.get('FEISHU_APP_ID') && this.config.get('FEISHU_APP_SECRET'));
   }
 
+  /** 用邮箱查真实飞书用户的 open_id（推送卡片/寻址都需要用open_id，不能直接用邮箱）。未配置飞书或查不到时返回 null。 */
+  async getOpenIdByEmail(email: string): Promise<string | null> {
+    if (!this.isConfigured() || !email) return null;
+    try {
+      const token = await this.getTenantAccessToken();
+      const res = await fetch('https://open.feishu.cn/open-apis/contact/v3/users/batch_get_id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ emails: [email] }),
+      });
+      const data = await res.json();
+      const item = data?.data?.user_list?.[0];
+      return item?.user_id ? item.user_id : null; // 该接口按请求的user_id_type返回，默认配置下为open_id
+    } catch (e) {
+      console.warn('[FeishuService] 邮箱查open_id失败：', e.message);
+      return null;
+    }
+  }
+
   private async getTenantAccessToken(): Promise<string> {
     if (this.tenantToken && Date.now() < this.tokenExpiresAt) return this.tenantToken;
     const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
@@ -74,8 +93,8 @@ export class FeishuService {
         {
           tag: 'action',
           actions: [
-            { tag: 'button', text: { tag: 'plain_text', content: '同意面试' }, type: 'primary', value: { interviewId: resume.id, willingToInterview: true } },
-            { tag: 'button', text: { tag: 'plain_text', content: '暂不安排' }, type: 'default', value: { interviewId: resume.id, willingToInterview: false } },
+            { tag: 'button', text: { tag: 'plain_text', content: '同意面试' }, type: 'primary', value: { kind: 'interview_response', interviewId: resume.id, willingToInterview: true } },
+            { tag: 'button', text: { tag: 'plain_text', content: '暂不安排' }, type: 'default', value: { kind: 'interview_response', interviewId: resume.id, willingToInterview: false } },
           ],
         },
       ],
@@ -93,7 +112,7 @@ export class FeishuService {
         { tag: 'hr' },
         {
           tag: 'action',
-          actions: [{ tag: 'button', text: { tag: 'plain_text', content: '确认' }, type: 'primary', value: { offerId } }],
+          actions: [{ tag: 'button', text: { tag: 'plain_text', content: '确认' }, type: 'primary', value: { kind: 'offer_confirm', offerId } }],
         },
       ],
     };

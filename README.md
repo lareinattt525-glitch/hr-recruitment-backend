@@ -35,7 +35,7 @@ npm run start:dev
 | 模块 | 文件 | 需要你做的事 |
 |---|---|---|
 | AI（DeepSeek） | `src/ai-adapter/deepseek.provider.ts` | 在 `.env` 填 `DEEPSEEK_API_KEY` 即可直接跑通，无需改代码 |
-| 飞书 | `src/feishu-integration/feishu.service.ts` | 在飞书开放平台创建自建应用，填 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_ENCRYPT_KEY`；卡片JSON建议用飞书官方"卡片搭建工具"重新生成后替换 `buildCandidateCard` / `buildOfferConfirmCard` 里的结构 |
+| 飞书 | `src/feishu-integration/feishu.service.ts` + `src/feishu-webhook/` | 在飞书开放平台创建自建应用，填 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`；把「事件与回调」的请求网址配置成 `你的后端地址/webhooks/feishu/callback`；权限至少要开：获取用户邮箱等基本信息（用于邮箱查open_id）、以应用身份发消息、卡片回传交互 |
 | 腾讯企业邮箱 | `src/email-polling/email-polling.service.ts` | 安装并接入 `imapflow` + `mailparser`（已在package.json中声明依赖），按文件内注释补全IMAP连接与邮件解析逻辑；`.env` 中填 `RESUME_INBOX_USER` / `RESUME_INBOX_APP_PASSWORD`（腾讯企业邮箱后台生成的"客户端专用密码"，不要用登录密码） |
 
 其余功能（职位/JD、简历评分、反馈闭环、面试流转、Offer三方确认）都是可直接调用的真实业务逻辑，不依赖上述三个外部凭证也能跑通（AI相关接口会在没有 `DEEPSEEK_API_KEY` 时报错，属预期行为）。
@@ -85,6 +85,23 @@ curl -X POST http://localhost:3000/users \
 - 目前是"接口级别"权限（谁能调哪个接口），还没做"数据级别"权限——比如用人部门理论上应该只看到自己发起的职位，现在是能看到全部职位列表（只是创建/发布JD这类操作被角色挡住了）。这个后续可以在 Service 层按 `requesterId` 过滤补上。
 - 飞书webhook的签名校验代码已经写好（`FeishuService.verifySignature`），但controller里还没有真正调用它做拦截——因为需要真实的飞书应用凭证才能测试，先留了TODO标注，接入真实飞书应用时记得补上，否则这两个回调接口任何人都能伪造请求调用。
 - 没有做"忘记密码"、账号禁用/删除、登录失败次数限制这些运营向功能。
+
+## 飞书真实接入说明
+
+### 两套"飞书回调"接口，不要搞混
+
+- `POST /webhooks/feishu/card-callback`、`POST /webhooks/feishu/offer-confirm-callback`：给**我们自己的前端**"模拟飞书交互"用的，走的是我们自己定义的干净JSON格式，不涉及真实飞书。前端一直在用，不要删。
+- `POST /webhooks/feishu/callback`：**真实飞书服务器会调用的地址**。飞书只允许配置一个统一的"请求网址"，这里负责把飞书的原始回调格式解析后，转发给和上面两个接口相同的业务逻辑，不重复写一遍。
+
+去飞书开发者后台配置"事件与回调"时，请求网址填：`你的后端地址/webhooks/feishu/callback`
+
+### 建议：先不配置 Encrypt Key
+
+飞书支持给回调加密（Encrypt Key），但加密后的URL校验握手需要额外的AES解密逻辑，这部分逻辑没有真实飞书环境没法完整测试，为了避免"看起来配了安全设置、实际没生效"的假象，代码里**暂时没有强依赖它**——不配置 Encrypt Key 时，回调走明文，一样能正常工作。等基本流程跑通后，如果需要这层额外加密，可以再回来加固（`FeishuWebhookController` 里已经留了处理位置和说明）。
+
+### 邮箱 → open_id
+
+飞书消息只能发给 open_id，不能直接发邮箱。代码里在"推送候选人给业务面试官"和"创建Offer发起三方确认"这两处，会自动把HR填的邮箱解析成真实open_id（调用飞书的邮箱查用户接口），这一步需要飞书应用开通"获取用户邮箱等基本信息"的权限。如果没开这个权限或查不到人，会自动退回成用邮箱字符串本身（配合前端"模拟飞书"的效果，不会报错卡住）。
 
 ## 核心接口速查（详见各 controller）
 
